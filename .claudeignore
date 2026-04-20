@@ -1,0 +1,54 @@
+# ============================================
+# .claudeignore — Claude Code 除外設定ファイル
+# ============================================
+# .gitignore と同じ書き方で、Claude Code に
+# 読ませたくないファイル・フォルダを指定します。
+# ============================================
+
+# --- セキュリティ：秘密情報 ---
+.env
+.env.local
+.env.development
+.env.production
+.env.test
+*.pem
+*.key
+secrets/
+
+# --- パフォーマンス：巨大フォルダ（トークン節約） ---
+node_modules/
+dist/
+build/
+.next/
+.nuxt/
+out/
+coverage/
+.cache/
+
+# --- バイナリ・メディアファイル ---
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.svg
+*.ico
+*.mp4
+*.mp3
+*.zip
+*.tar.gz
+
+# --- ログファイル ---
+*.log
+logs/
+npm-debug.log*
+
+# --- IDE・OS 設定ファイル ---
+.DS_Store
+.vscode/
+.idea/
+Thumbs.db
+
+# --- 一時ファイル ---
+tmp/
+temp/
+*.tmp
