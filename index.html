@@ -406,6 +406,7 @@ const auth = firebase.auth();
 const db = firebase.firestore();
 
 const ADMIN_EMAIL = 'gbh00167@gmail.com';
+let currentUser = null;
 
 // ===== 章データ =====
 const chapters = [
@@ -849,10 +850,13 @@ async function doLogout() {
 
 // ===== ユーザー情報表示 =====
 function setUserUI(user) {
+  currentUser = user;
   document.getElementById('sidebar-user-name').textContent = user.displayName || 'ゲスト';
   document.getElementById('sidebar-user-email').textContent = user.email;
   document.getElementById('welcome-name').textContent = `${user.displayName || ''}さん、ようこそ！`;
-  if (user.email === ADMIN_EMAIL) document.getElementById('admin-btn').style.display = 'inline-flex';
+  // 管理者ボタンは管理者のみ表示
+  const adminBtn = document.getElementById('admin-btn');
+  adminBtn.style.display = (user.email === ADMIN_EMAIL) ? 'inline-flex' : 'none';
 }
 
 // ===== 進捗管理（Firestore）=====
@@ -1017,6 +1021,11 @@ function answerQuiz(chId, qi, selected, correct) {
 
 // ===== 管理者画面 =====
 async function showAdmin() {
+  // 管理者以外はホームに戻す
+  if (!currentUser || currentUser.email !== ADMIN_EMAIL) {
+    showHome();
+    return;
+  }
   document.getElementById('home-screen').style.display = 'none';
   document.getElementById('chapter-screen').style.display = 'none';
   document.getElementById('admin-screen').style.display = 'block';
