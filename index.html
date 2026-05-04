@@ -150,6 +150,16 @@
       border-radius: 10px; font-family: 'Courier New', monospace; font-size: 15px;
       line-height: 1.7; margin: 16px 0; overflow-x: auto; white-space: pre; position: relative;
     }
+    .copy-btn {
+      position: absolute; top: 10px; right: 10px;
+      background: #334155; color: #94a3b8;
+      border: 1px solid #475569; border-radius: 6px;
+      padding: 5px 10px; font-size: 13px; cursor: pointer;
+      display: flex; align-items: center; gap: 5px;
+      transition: all 0.15s; white-space: nowrap; font-family: sans-serif;
+    }
+    .copy-btn:hover { background: #475569; color: #f1f5f9; }
+    .copy-btn.copied { background: #065f46; color: #6ee7b7; border-color: #065f46; }
     .info-box { padding: 18px 22px; border-radius: 10px; margin: 20px 0; font-size: 17px; line-height: 1.8; }
     .info-box.tip { background: #eff6ff; border-left: 5px solid #3b82f6; }
     .info-box.warning { background: #fffbeb; border-left: 5px solid #f59e0b; }
@@ -989,6 +999,7 @@ function showChapter(id) {
       </button>
     </div>`;
   window.scrollTo(0, 0);
+  addCopyButtons();
 }
 
 async function handleComplete(id) {
@@ -1061,6 +1072,32 @@ async function showAdmin() {
   } catch (e) {
     tbody.innerHTML = `<tr><td colspan="6" style="color:#dc2626;padding:20px;">読み込みエラー：${e.message}</td></tr>`;
   }
+}
+
+// ===== コピーボタン =====
+function addCopyButtons() {
+  document.querySelectorAll('.code-block').forEach(block => {
+    if (block.querySelector('.copy-btn')) return; // 二重追加を防ぐ
+    const btn = document.createElement('button');
+    btn.className = 'copy-btn';
+    btn.innerHTML = '📋 コピー';
+    btn.onclick = async () => {
+      const text = block.innerText.replace(/^📋 コピー\n?/, '').replace(/^✅ コピー済み\n?/, '');
+      try {
+        await navigator.clipboard.writeText(text.trim());
+        btn.innerHTML = '✅ コピー済み';
+        btn.classList.add('copied');
+        setTimeout(() => {
+          btn.innerHTML = '📋 コピー';
+          btn.classList.remove('copied');
+        }, 2000);
+      } catch {
+        btn.innerHTML = '❌ 失敗';
+        setTimeout(() => { btn.innerHTML = '📋 コピー'; }, 2000);
+      }
+    };
+    block.appendChild(btn);
+  });
 }
 
 // ===== スクロールトップ =====
