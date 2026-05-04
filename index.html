@@ -324,6 +324,10 @@
         <div id="progress-bar-wrap">
           <div id="progress-bar-fill" style="width:0%"></div>
         </div>
+        <span id="quiz-score-text" style="display:block; margin-top:8px;">🧠 理解度チェック：0 / 18 問正解</span>
+        <div id="quiz-bar-wrap" style="background:#334155; border-radius:4px; height:6px; margin-top:6px; overflow:hidden;">
+          <div id="quiz-bar-fill" style="height:100%; background:linear-gradient(90deg,#f59e0b,#10b981); border-radius:4px; width:0%; transition:width 0.4s ease;"></div>
+        </div>
       </div>
       <div class="nav-section">
         <div class="nav-section-title">メニュー</div>
@@ -381,11 +385,11 @@
           <thead>
             <tr>
               <th>お名前</th><th>メールアドレス</th><th>登録日</th>
-              <th>完了章数</th><th>最終アクセス</th><th>進捗</th>
+              <th>完了章数</th><th>理解度</th><th>最終アクセス</th><th>進捗</th>
             </tr>
           </thead>
           <tbody id="admin-table-body">
-            <tr><td colspan="6" class="loading">読み込み中...</td></tr>
+            <tr><td colspan="7" class="loading">読み込み中...</td></tr>
           </tbody>
         </table>
       </div>
@@ -417,6 +421,7 @@ const db = firebase.firestore();
 
 const ADMIN_EMAIL = 'gbh00167@gmail.com';
 let currentUser = null;
+let quizResults = {}; // { "chId_qi": true/false }
 
 // ===== 章データ =====
 const chapters = [
@@ -880,11 +885,32 @@ async function loadProgress(uid) {
     if (snap.exists) {
       const data = snap.data();
       completedSet = new Set(data.completedChapters || []);
+      quizResults = data.quizResults || {};
     }
   } catch (e) { console.error('進捗の読み込みエラー:', e); }
   updateProgressBar();
   buildSidebar();
   buildChapterGrid();
+}
+
+// クイズスコア集計ヘルパー
+function getChapterQuizScore(chId) {
+  const ch = chapters.find(c => c.id === chId);
+  const total = ch && ch.quiz ? ch.quiz.length : 0;
+  let correct = 0;
+  for (let qi = 0; qi < total; qi++) {
+    if (quizResults[`${chId}_${qi}`] === true) correct++;
+  }
+  return { correct, total };
+}
+
+function getTotalQuizScore() {
+  let correct = 0, total = 0;
+  chapters.forEach(ch => {
+    const s = getChapterQuizScore(ch.id);
+    correct += s.correct; total += s.total;
+  });
+  return { correct, total };
 }
 
 async function markComplete(id) {
@@ -907,6 +933,9 @@ function updateProgressBar() {
   const total = chapters.length;
   document.getElementById('progress-text').textContent = `学習進捗：${done} / ${total} 章完了`;
   document.getElementById('progress-bar-fill').style.width = `${(done / total) * 100}%`;
+  const qs = getTotalQuizScore();
+  document.getElementById('quiz-score-text').textContent = `🧠 理解度チェック：${qs.correct} / ${qs.total} 問正解`;
+  document.getElementById('quiz-bar-fill').style.width = qs.total > 0 ? `${(qs.correct / qs.total) * 100}%` : '0%';
 }
 
 // ===== サイドバー =====
@@ -953,9 +982,19 @@ function buildChapterGrid() {
   const grid = document.getElementById('chapter-grid');
   grid.innerHTML = '';
   chapters.forEach(ch => {
+    const s = getChapterQuizScore(ch.id);
+    const quizBadge = s.total > 0
+      ? `<span id="quiz-badge-${ch.id}" style="font-size:13px; color:${s.correct === s.total && s.correct > 0 ? '#16a34a' : '#64748b'};">🧠 ${s.correct}/${s.total}問</span>`
+      : '';
     const div = document.createElement('div');
     div.className = 'chapter-card' + (isComplete(ch.id) ? ' completed' : '');
-    div.innerHTML = `<div class="chapter-num">${ch.num}</div><div class="chapter-info"><h4>${ch.title}</h4><p>⏱ ${ch.time} &nbsp;|&nbsp; 🎯 ${ch.goal}</p></div><div class="status-icon">${isComplete(ch.id) ? '✅' : '▶'}</div>`;
+    div.innerHTML = `
+      <div class="chapter-num">${ch.num}</div>
+      <div class="chapter-info">
+        <h4>${ch.title}</h4>
+        <p>⏱ ${ch.time} &nbsp;|&nbsp; ${quizBadge}</p>
+      </div>
+      <div class="status-icon">${isComplete(ch.id) ? '✅' : '▶'}</div>`;
     div.onclick = () => showChapter(ch.id);
     grid.appendChild(div);
   });
@@ -982,6 +1021,7 @@ function showChapter(id) {
       <div class="chapter-meta">
         <span class="meta-badge time">⏱ ${ch.time}</span>
         <span class="meta-badge goal">🎯 ${ch.goal}</span>
+        ${(() => { const s = getChapterQuizScore(ch.id); return s.correct > 0 ? `<span class="meta-badge" style="background:#dcfce7;color:#16a34a;" id="quiz-badge-${ch.id}">🧠 ${s.correct}/${s.total}問正解</span>` : `<span class="meta-badge" style="background:#f1f5f9;color:#64748b;" id="quiz-badge-${ch.id}">🧠 未回答</span>`; })()}
       </div>
     </div>
     ${ch.content}
@@ -1021,13 +1061,34 @@ function buildQuiz(quizData, chId) {
   return html + '</div>';
 }
 
-function answerQuiz(chId, qi, selected, correct) {
+async function answerQuiz(chId, qi, selected, correct) {
+  // 既に回答済みなら無視
+  if (quizResults[`${chId}_${qi}`] !== undefined) return;
+  const isCorrect = selected === correct;
+  quizResults[`${chId}_${qi}`] = isCorrect;
+
   document.querySelectorAll(`#opts-${chId}-${qi} li`).forEach((li, i) => {
     li.onclick = null;
     if (i === correct) li.classList.add('correct');
     else if (i === selected) li.classList.add('wrong');
   });
   document.getElementById(`answer-${chId}-${qi}`).classList.add('visible');
+
+  // 章のスコアバッジを更新
+  const s = getChapterQuizScore(chId);
+  const badge = document.getElementById(`quiz-badge-${chId}`);
+  if (badge) badge.textContent = `🧠 ${s.correct}/${s.total}問`;
+
+  // サイドバーの進捗を更新
+  updateProgressBar();
+
+  // Firestoreに保存
+  try {
+    await db.collection('users').doc(currentUid).update({
+      quizResults,
+      lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
+    });
+  } catch (e) { console.error('クイズ結果の保存エラー:', e); }
 }
 
 // ===== 管理者画面 =====
@@ -1042,21 +1103,26 @@ async function showAdmin() {
   document.getElementById('admin-screen').style.display = 'block';
   document.getElementById('top-title').textContent = '⚙️ 管理者ダッシュボード';
   const tbody = document.getElementById('admin-table-body');
-  tbody.innerHTML = '<tr><td colspan="6" class="loading">読み込み中...</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="7" class="loading">読み込み中...</td></tr>';
   try {
     const snap = await db.collection('users').get();
     const users = [];
     snap.forEach(doc => users.push({ id: doc.id, ...doc.data() }));
     const chNames = ['前書き','1章','2章','3章','4章','5章','6章','7章','8章'];
+    const totalQ = chapters.reduce((s, ch) => s + (ch.quiz ? ch.quiz.length : 0), 0);
     document.getElementById('stat-users').textContent = users.length;
     document.getElementById('stat-active').textContent = users.filter(u => (u.completedChapters||[]).length > 0).length;
     document.getElementById('stat-complete').textContent = users.filter(u => (u.completedChapters||[]).length >= 9).length;
     if (users.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#94a3b8;padding:40px;">受講者がいません</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#94a3b8;padding:40px;">受講者がいません</td></tr>';
       return;
     }
     tbody.innerHTML = users.map(u => {
       const done = u.completedChapters || [];
+      const qr = u.quizResults || {};
+      const correct = Object.values(qr).filter(v => v === true).length;
+      const answered = Object.keys(qr).length;
+      const quizColor = answered === 0 ? '#94a3b8' : correct === answered ? '#16a34a' : '#d97706';
       const joined = u.joinedAt ? new Date(u.joinedAt.seconds*1000).toLocaleDateString('ja-JP') : '—';
       const last = u.lastUpdated ? new Date(u.lastUpdated.seconds*1000).toLocaleDateString('ja-JP') : '—';
       const pills = chNames.map((n, i) => `<span class="pill ${done.includes(i) ? 'done' : 'not'}">${n}</span>`).join('');
@@ -1065,12 +1131,13 @@ async function showAdmin() {
         <td>${u.email}</td>
         <td>${joined}</td>
         <td><strong>${done.length}</strong> / 9</td>
+        <td style="color:${quizColor}; font-weight:bold;">🧠 ${correct} / ${totalQ}問</td>
         <td>${last}</td>
         <td><div class="progress-pills">${pills}</div></td>
       </tr>`;
     }).join('');
   } catch (e) {
-    tbody.innerHTML = `<tr><td colspan="6" style="color:#dc2626;padding:20px;">読み込みエラー：${e.message}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="7" style="color:#dc2626;padding:20px;">読み込みエラー：${e.message}</td></tr>`;
   }
 }
 
