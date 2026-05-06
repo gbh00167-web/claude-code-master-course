@@ -277,8 +277,8 @@
     <!-- ログインフォーム -->
     <div id="login-form" class="auth-form">
       <div>
-        <label>メールアドレス</label>
-        <input type="email" id="login-email" placeholder="you@example.com" autocomplete="email">
+        <label>メールアドレス または ユーザー名</label>
+        <input type="text" id="login-email" placeholder="you@example.com または yamada123" autocomplete="username">
       </div>
       <div>
         <label>パスワード</label>
@@ -292,6 +292,12 @@
       <div>
         <label>お名前</label>
         <input type="text" id="reg-name" placeholder="山田 太郎">
+      </div>
+      <div>
+        <label>ユーザー名（半角英数字・ログインに使用）</label>
+        <input type="text" id="reg-username" placeholder="yamada123" autocomplete="off"
+          oninput="this.value=this.value.replace(/[^a-zA-Z0-9_]/g,'')">
+        <div style="font-size:13px;color:#94a3b8;margin-top:4px;">半角英数字とアンダースコアのみ。例：yamada_taro</div>
       </div>
       <div>
         <label>メールアドレス</label>
@@ -384,12 +390,12 @@
         <table class="user-table">
           <thead>
             <tr>
-              <th>お名前</th><th>メールアドレス</th><th>登録日</th>
+              <th>お名前</th><th>ユーザー名</th><th>メールアドレス</th><th>登録日</th>
               <th>完了章数</th><th>理解度</th><th>最終アクセス</th><th>進捗</th>
             </tr>
           </thead>
           <tbody id="admin-table-body">
-            <tr><td colspan="7" class="loading">読み込み中...</td></tr>
+            <tr><td colspan="8" class="loading">読み込み中...</td></tr>
           </tbody>
         </table>
       </div>
@@ -826,35 +832,70 @@ function clearMessages() {
 }
 
 async function doLogin() {
-  const email = document.getElementById('login-email').value.trim();
+  let input = document.getElementById('login-email').value.trim();
   const password = document.getElementById('login-password').value;
-  if (!email || !password) { showError('メールアドレスとパスワードを入力してください'); return; }
+  if (!input || !password) { showError('ユーザー名（またはメールアドレス）とパスワードを入力してください'); return; }
+
+  // メールアドレスでなければユーザー名として検索
+  let email = input;
+  if (!input.includes('@')) {
+    try {
+      const snap = await db.collection('usernames').doc(input.toLowerCase()).get();
+      if (!snap.exists) { showError('このユーザー名は登録されていません'); return; }
+      email = snap.data().email;
+    } catch (e) {
+      showError('ユーザー名の確認に失敗しました：' + e.message); return;
+    }
+  }
+
   try {
     await auth.signInWithEmailAndPassword(email, password);
   } catch (e) {
-    const msgs = { 'auth/user-not-found': 'このメールアドレスは登録されていません', 'auth/wrong-password': 'パスワードが間違っています', 'auth/invalid-email': 'メールアドレスの形式が正しくありません', 'auth/invalid-credential': 'メールアドレスまたはパスワードが間違っています' };
+    const msgs = {
+      'auth/user-not-found': 'このアカウントは登録されていません',
+      'auth/wrong-password': 'パスワードが間違っています',
+      'auth/invalid-email': 'メールアドレスの形式が正しくありません',
+      'auth/invalid-credential': 'ユーザー名（またはメールアドレス）かパスワードが間違っています'
+    };
     showError(msgs[e.code] || 'ログインに失敗しました：' + e.message);
   }
 }
 
 async function doRegister() {
   const name = document.getElementById('reg-name').value.trim();
+  const username = document.getElementById('reg-username').value.trim().toLowerCase();
   const email = document.getElementById('reg-email').value.trim();
   const password = document.getElementById('reg-password').value;
-  if (!name || !email || !password) { showError('すべての項目を入力してください'); return; }
+  if (!name || !username || !email || !password) { showError('すべての項目を入力してください'); return; }
+  if (!/^[a-zA-Z0-9_]+$/.test(username)) { showError('ユーザー名は半角英数字とアンダースコアのみ使用できます'); return; }
+  if (username.length < 3) { showError('ユーザー名は3文字以上で設定してください'); return; }
   if (password.length < 6) { showError('パスワードは6文字以上で設定してください'); return; }
   try {
+    // ユーザー名の重複チェック
+    const usernameSnap = await db.collection('usernames').doc(username).get();
+    if (usernameSnap.exists) { showError('このユーザー名はすでに使用されています'); return; }
+
     const cred = await auth.createUserWithEmailAndPassword(email, password);
     await cred.user.updateProfile({ displayName: name });
+
+    // ユーザー情報を保存
     await db.collection('users').doc(cred.user.uid).set({
-      email, displayName: name,
+      email, displayName: name, username,
       completedChapters: [],
       joinedAt: firebase.firestore.FieldValue.serverTimestamp(),
       lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
     });
+
+    // ユーザー名→メール の対応表を保存
+    await db.collection('usernames').doc(username).set({ email, uid: cred.user.uid });
+
     showSuccess('アカウントを作成しました！ログインしています…');
   } catch (e) {
-    const msgs = { 'auth/email-already-in-use': 'このメールアドレスはすでに登録されています', 'auth/invalid-email': 'メールアドレスの形式が正しくありません', 'auth/weak-password': 'パスワードが短すぎます（6文字以上）' };
+    const msgs = {
+      'auth/email-already-in-use': 'このメールアドレスはすでに登録されています',
+      'auth/invalid-email': 'メールアドレスの形式が正しくありません',
+      'auth/weak-password': 'パスワードが短すぎます（6文字以上）'
+    };
     showError(msgs[e.code] || '登録に失敗しました：' + e.message);
   }
 }
@@ -864,14 +905,21 @@ async function doLogout() {
 }
 
 // ===== ユーザー情報表示 =====
-function setUserUI(user) {
+async function setUserUI(user) {
   currentUser = user;
   document.getElementById('sidebar-user-name').textContent = user.displayName || 'ゲスト';
-  document.getElementById('sidebar-user-email').textContent = user.email;
   document.getElementById('welcome-name').textContent = `${user.displayName || ''}さん、ようこそ！`;
   // 管理者ボタンは管理者のみ表示
   const adminBtn = document.getElementById('admin-btn');
   adminBtn.style.display = (user.email === ADMIN_EMAIL) ? 'inline-flex' : 'none';
+  // ユーザー名をFirestoreから取得して表示（なければメールアドレスを表示）
+  try {
+    const snap = await db.collection('users').doc(user.uid).get();
+    const username = snap.exists && snap.data().username ? '@' + snap.data().username : user.email;
+    document.getElementById('sidebar-user-email').textContent = username;
+  } catch (e) {
+    document.getElementById('sidebar-user-email').textContent = user.email;
+  }
 }
 
 // ===== 進捗管理（Firestore）=====
@@ -1103,7 +1151,7 @@ async function showAdmin() {
   document.getElementById('admin-screen').style.display = 'block';
   document.getElementById('top-title').textContent = '⚙️ 管理者ダッシュボード';
   const tbody = document.getElementById('admin-table-body');
-  tbody.innerHTML = '<tr><td colspan="7" class="loading">読み込み中...</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="8" class="loading">読み込み中...</td></tr>';
   try {
     const snap = await db.collection('users').get();
     const users = [];
@@ -1114,7 +1162,7 @@ async function showAdmin() {
     document.getElementById('stat-active').textContent = users.filter(u => (u.completedChapters||[]).length > 0).length;
     document.getElementById('stat-complete').textContent = users.filter(u => (u.completedChapters||[]).length >= 9).length;
     if (users.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#94a3b8;padding:40px;">受講者がいません</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#94a3b8;padding:40px;">受講者がいません</td></tr>';
       return;
     }
     tbody.innerHTML = users.map(u => {
@@ -1128,6 +1176,7 @@ async function showAdmin() {
       const pills = chNames.map((n, i) => `<span class="pill ${done.includes(i) ? 'done' : 'not'}">${n}</span>`).join('');
       return `<tr>
         <td><strong>${u.displayName || '—'}</strong></td>
+        <td>${u.username ? '@' + u.username : '—'}</td>
         <td>${u.email}</td>
         <td>${joined}</td>
         <td><strong>${done.length}</strong> / 9</td>
@@ -1137,7 +1186,7 @@ async function showAdmin() {
       </tr>`;
     }).join('');
   } catch (e) {
-    tbody.innerHTML = `<tr><td colspan="7" style="color:#dc2626;padding:20px;">読み込みエラー：${e.message}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="8" style="color:#dc2626;padding:20px;">読み込みエラー：${e.message}</td></tr>`;
   }
 }
 
